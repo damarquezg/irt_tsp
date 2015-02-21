@@ -1,0 +1,7 @@
+pop_size: 2000                  # size of the population
+max_iter: 1000                  # exit loop at max iterations
+tries: 50                       # launch the genetic algorithm <tries> times with different initial population
+iter_out: 30                    # exit loop if the best is the same during <iter_out> iterations
+keep_best: 5                    # elitism, always keeps <keep_best> individuals
+selection_type: tournament      # tournament, scaling
+use_mp: True                    # uses multi processing for the tries

@@ -9,7 +9,7 @@ from time import time
 import pylab
 from profilestats import profile
 from heapq import nsmallest
-from multiprocessing import Process, Queue
+from multiprocessing import Pool, Queue
 
 pylab.ion()
 
@@ -32,27 +32,11 @@ class Indiv:
         self.ordering = [0] + ordering
     def compute_cost(self):
         self.cost = sum([self.nodes[self.ordering[i-1]].cost_to[self.ordering[i]] for i in xrange(self.n)])
-
-    def mutation(self):
-        '''
-        Performs a mutation of this individual
-        Switches two nodes in the ordering
-        '''
-        while random.random() < 0.1:
-            n1 = random.randint(1,self.n-1)
-            n2 = n1
-            while n1 == n2:
-                n2 = random.randint(1,self.n-1)
-            v = self.ordering[n1]
-            self.ordering[n1] = self.ordering[n2]
-            self.ordering[n2] = v
-        # compute cost
-        self.compute_cost()
         
-    def cross(self, other):
+    def cross_and_mutate(self, other):
         '''
         Performs a crossing between this and the other
-        Returns a new individual with its cost computed
+        Mutates the new individual and returns it
         '''
         # random index
         #print 'self', self.ordering
@@ -69,18 +53,17 @@ class Indiv:
         ordering += [i for i in other.ordering[idx:] if i not in ordering]
         # append beginning of other
         ordering += beginning
-        return Indiv(ordering)# no need to compute cost as crossings are mutated
-    
-def find_n_min_index(l, n):
-    i = l.index(min(l))
-    if n == 1:
-        return [i]
-    if i == 0:
-        return [i] + find_n_min_index(l[1:], n-1)
-    elif i == len(l)-1:
-        return [i] + find_n_min_index(l[:-1], n-1)
-    return [i] + find_n_min_index(l[:i-1]+l[i+1:],n-1)
         
+        # mutation
+        n1 = random.randint(0,self.n-2)
+        n2 = random.randint(0,self.n-2)
+        while n1 == n2:
+            n2 = random.randint(0,self.n-2)
+        # switch
+        (ordering[n1],ordering[n2]) = (ordering[n2],ordering[n1])
+        # build and return new indiv
+        return Indiv(ordering)
+   
         
 @profile()        
 def ga_min(population, config, q = None):
@@ -97,7 +80,6 @@ def ga_min(population, config, q = None):
     # init global values
     pop_size = len(population)
     half_pop = pop_size/2
-    total_rank = pop_size*(pop_size+1)/2
    
     # compute cost of initial individuals
     for indiv in population:
@@ -132,16 +114,17 @@ def ga_min(population, config, q = None):
             else:
                 new_pop.append(population[n2])  
         
-        # reproduction
+        # reproduction and mutation
         for i in xrange(half_pop):
             n1 = random.randint(0,half_pop-1)
             n2 = random.randint(0,half_pop-1)
-            new_pop.append(new_pop[n1].cross(new_pop[n2]))
-        # mutation
-        for indiv in new_pop:
-            indiv.mutation()
+            new_pop.append(new_pop[n1].cross_and_mutate(new_pop[n2]))
+            
+        # compute cost of new individuals
+        for i in xrange(half_pop, pop_size):
+            new_pop[i].compute_cost()
            
-        # change to population
+        # update population
         population = new_pop
         costs = [indiv.cost for indiv in population]
         nbest = nsmallest(keep_best, costs)
@@ -214,23 +197,18 @@ if __name__ == '__main__':
     
     if config['use_mp']:
         # multi processing: build all processes
-        q = Queue()
-        processes = []    
+        pool = Pool() 
+        results = []
         for i in xrange(config['tries']):
             # build starting configuration
             for ordering in gen:
                 random.shuffle(ordering)
-            # build corresponding process
-            processes.append(Process(target=ga_min, args=([Indiv(ordering) for ordering in gen], config, q)))
-        # start processes
-        for p in processes:
-            p.start()
-        # get results
-        for p in processes:
-            p.join()
+            # add this solver to pool
+            results.append(pool.apply_async(ga_min, args=([Indiv(ordering) for ordering in gen], config)))
+
         # extract
         for i in xrange(config['tries']):
-            best_indiv,best_costs = q.get()
+            best_indiv,best_costs = results[i].get()
             if i == 0:
                 best_of_the_bests = best_indiv
             elif best_indiv.cost < best_of_the_bests.cost:
